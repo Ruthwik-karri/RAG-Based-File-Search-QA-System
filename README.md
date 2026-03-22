@@ -84,9 +84,15 @@ uvicorn main:app --reload
 
 Set API key:
 export GROQ_API_KEY="your_api_key_here"
+````
 ---
 
+
 ### Frontend Setup
+```bash
 cd frontend
 npm install
 npm run dev
+```
+
+
