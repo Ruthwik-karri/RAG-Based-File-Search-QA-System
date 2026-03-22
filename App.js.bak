@@ -1,0 +1,136 @@
+import React, { useState, useEffect } from "react";
+import ChatWindow from "./Chatwindow";
+import ChatInput  from "./Chatinput";
+import Sidebar    from "./Sidebar";
+import "./App.css"; 
+
+function App() {
+
+  // isLoading — true while waiting for backend response
+  const [isLoading, setIsLoading] = useState(false);
+
+  // history — array of { id, label, sub, messages: [] }
+  const [history, setHistory] = useState([
+    { id: 1, label: "File upload", sub: "just now", messages: [] }
+  ]);
+
+  const [activeConv, setActiveConv] = useState(null);
+  const [currentMessages, setCurrentMessages] = useState([]); 
+
+  // Load messages when activeConv changes
+  useEffect(() => {
+    if (activeConv) {
+      const conv = history.find(c => c.id === activeConv);
+      setCurrentMessages(conv?.messages || []);
+    } else {
+      setCurrentMessages([]);
+    }
+  }, [activeConv, history]);
+
+  // ── sendMessage ─────────────────────────────────────────
+  // Called by <ChatInput> with (text, filesArray)
+  const sendMessage = async (text, files) => {
+    if (!text.trim() && files.length === 0) return;
+
+    // 1. Show user bubble immediately
+    const userMsg = { role: "user", content: text || `📎 ${files.map(f => f.name).join(", ")}` };
+    const updated = [...currentMessages, userMsg];
+    setCurrentMessages(updated);
+    setIsLoading(true);
+
+    // 2. Add to sidebar history on first message
+    if (currentMessages.length === 0) {
+      const newId = Date.now();
+      const newConv = { 
+        id: newId, 
+        label: text.slice(0, 38) || "New conversation", 
+        sub: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+        messages: updated 
+      };
+      setHistory(prev => [newConv, ...prev]);
+      setActiveConv(newId);
+    } else {
+      // Update current conv messages
+      setHistory(prev => prev.map(conv => 
+        conv.id === activeConv ? { ...conv, messages: updated, sub: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) } : conv
+      ));
+    }
+
+    // 3. Call Python backend
+    try {
+      const formData = new FormData();
+      formData.append("query", text);
+      files.forEach(f => formData.append("files", f));
+
+      const res = await fetch("http://localhost:8000/chat", {
+        method: "POST",
+        body: formData
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      const fullUpdated = [...updated, { role: "assistant", content: data.answer || data.response || "No answer returned." }];
+      setCurrentMessages(fullUpdated);
+
+      // Update history
+      setHistory(prev => prev.map(conv => 
+        conv.id === activeConv ? { ...conv, messages: fullUpdated, sub: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) } : conv
+      ));
+    } catch (err) {
+      const fullUpdated = [...updated, { role: "assistant", content: `⚠️ Error: ${err.message}` }];
+      setCurrentMessages(fullUpdated);
+
+      setHistory(prev => prev.map(conv => 
+        conv.id === activeConv ? { ...conv, messages: fullUpdated } : conv
+      ));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Clear chat and deselect history
+  const startNewChat = () => {
+    setCurrentMessages([]);
+    setActiveConv(null);
+  };
+
+  const deleteConversations = (ids) => {
+    setHistory(prev => prev.filter(item => !ids.includes(item.id)));
+
+    // If active chat deleted → clear chat
+    if (ids.includes(activeConv)) {
+      setCurrentMessages([]);
+      setActiveConv(null);
+    }
+  };
+
+  return (
+    <div className="app">
+
+      {/* Left column — header + messages + input */}
+      <div className="chat-area">
+        <ChatWindow
+          messages={currentMessages}
+          isLoading={isLoading}
+        />
+        <ChatInput
+          sendMessage={sendMessage}
+          isLoading={isLoading}
+        />
+      </div>
+
+      {/* Right column — sidebar history panel */}
+      <Sidebar
+        history={history}
+        activeConv={activeConv}
+        onSelectConv={setActiveConv}
+        onNewChat={startNewChat}
+        onDelete={deleteConversations}
+      />
+
+    </div>
+  );
+}
+
+export default App;
